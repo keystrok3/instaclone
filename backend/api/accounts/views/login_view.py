@@ -44,7 +44,7 @@ class LoginView(TokenObtainPairView):
 
             # Set the access token as an HTTP-only, secure, samesite cookie
             response.set_cookie(
-                key=settings.SIMPLE_JWT['AUTH_COOKIE_REFRESH'],
+                key=settings.SIMPLE_JWT['AUTH_COOKIE_ACCESS'],
                 value=access_token,
                 httponly=True,
                 secure=not settings.DEBUG,

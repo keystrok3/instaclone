@@ -1,49 +1,78 @@
-
-
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import authenticate, get_user_model
 from django.db.models import Q # for complex lookups
 from rest_framework import serializers
+from django.utils.translation import gettext_lazy as _
 
 User = get_user_model()
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """
-    By default, TokenObtainPairSerializer expects 'username' and 'password'
-    We will override the username field to accept either the username or the email
-    The password field remains the same
+    Custom serializer for JWT token creation that allows login with
+    either username or email.
     """
+    # Override the parent's username field to make it not required
+    username = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
 
-    username_field = User.USERNAME_FIELD 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Remove the username field requirement from the parent class
+        self.fields['username'].required = False
+        self.fields['username'].allow_blank = True
 
     def validate(self, attrs):
-        """
-        The 'attrs' dictionary initially contains 'username' and 'password' based on 
-        incoming request body.
-        We'll try to find the requested user using either username or password
-        """
-        input_identifier = attrs.get('username')
+        # Get the email and username fields from attrs
+        email = attrs.get('email', '').strip() if attrs.get('email') else ''
+        username = attrs.get('username', '').strip() if attrs.get('username') else ''
         password = attrs.get('password')
 
-        if not input_identifier or not password:
-            raise serializers.ValidationError('Must include "username or email and "password')
+        # Ensure at least one identifier is provided
+        if not email and not username:
+            raise serializers.ValidationError(
+                _('Must include username or email'),
+                code='authorization'
+            )
         
-        # Try to find the user by username or email
-        try:
-            # Q objects allow you to build complex OR queries
-            user = User.objects.get(Q(username__iexact=input_identifier) | Q(email__iexact=input_identifier))
-
-        except User.DoesNotExist:
-            raise serializers.ValidationError('No active account found with given credentials')
-
-
-        if user and user.check_password(password):
-            attrs['user'] = user
-
+        # Build the credentials dictionary for 'authenticate'
+        credentials = {
+            'password': password
+        }
+        
+        user_to_authenticate = None
+        
+        if email:
+            try:
+                user_model = get_user_model()
+                user_to_authenticate = user_model.objects.get(email__iexact=email)
+                credentials['username'] = user_to_authenticate.get_username()
+            except user_model.DoesNotExist:
+                # User with this email doesn't exist
+                raise serializers.ValidationError(
+                    _('No active account found with the given credentials'),
+                    code='authorization'
+                )
         else:
-            raise serializers.ValidationError('No active account found with given credentials')
+            credentials['username'] = username
+        
+        # Authenticate the user
+        self.user = authenticate(**credentials)
 
-        # The parent TokenObtainPairSerializer's validate method expects 'user' in attrs
-        # to generate tokens. We've set it correctly now
-        return super().validate(attrs) 
+        if not self.user or not self.user.is_active:
+            raise serializers.ValidationError(
+                _('No active account found with the given credentials'),
+                code='authorization'
+            )
+
+        # Set the username in attrs for the parent class to use
+        attrs['username'] = self.user.get_username()
+        
+        # Call the parent's validate method with the modified attrs
+        # Remove email from attrs since parent class doesn't expect it
+        validated_attrs = {
+            'username': attrs['username'],
+            'password': attrs['password']
+        }
+        
+        return super().validate(validated_attrs)
