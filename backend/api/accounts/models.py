@@ -7,6 +7,7 @@ class User(AbstractUser):
     Custom user model that extends Django's AbstractUser.
     """
     bio = models.TextField(blank=True, null=True)
+    email = models.EmailField(unique=True, blank=False, null=False)
     profile_picture = models.ImageField(upload_to='profile_pictures/', blank=True, null=True)
     
     class Meta:

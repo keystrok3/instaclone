@@ -2,30 +2,57 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.authtoken.models import Token
-from django.contrib.auth import authenticate
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.conf import settings
+import logging
+
+from accounts.serializers.login_serializer import CustomTokenObtainPairSerializer
+
+logger = logging.getLogger(__name__)
 
 
+class LoginView(TokenObtainPairView):
+    """
+    Customizes the TokenObtainPairView to set JWT tokens as HTTP-only cookies
+    """
+    serializer_class = CustomTokenObtainPairSerializer
 
-class LoginView(APIView):
-    def post(self, request):
-        username = request.data.get('username')
-        password = request.data.get('password')
+    def post(self, request, *args, **kwargs):
+        # Call the parent's post method to get the standard token response
+        # This will run the CustomTokenObtainPairSerializer and generate tokens
+        response = super().post(request, *args, **kwargs)
 
-        if username is None or password is None:
-            return Response(
-                {"detail": "Please provide both username and password"},
-                status=status.HTTP_400_BAD_REQUEST
+        if response.status_code == status.HTTP_200_OK:
+            # Extract  the tokens from the response data
+            access_token = response.data.get('access')
+            refresh_token = response.data.get('refresh')
+
+            del response.data['access']
+            del response.data['refresh']
+
+            # Set the refresh token as an HTTP-only, secure, and samesite cookie
+            response.set_cookie(
+                key=settings.SIMPLE_JWT['AUTH_COOKIE_REFRESH'],
+                value=refresh_token,
+                httponly=True,
+                secure=not settings.DEBUG,
+                samesite='Lax',
+                expires=settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'],
+                path='/'
             )
-        
-        user = authenticate(username=username, password=password) # if given credentials are valid, return a user object
 
-        if not user:
-            return Response(
-                {"detail": "Invalid Credentials"},
-                status=status.HTTP_401_UNAUTHORIZED
+            # Set the access token as an HTTP-only, secure, samesite cookie
+            response.set_cookie(
+                key=settings.SIMPLE_JWT['AUTH_COOKIE_REFRESH'],
+                value=access_token,
+                httponly=True,
+                secure=not settings.DEBUG,
+                samesite='Lax',
+                expires=settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'],
+                path='/'
             )
-        
-        token, created = Token.objects.get_or_create(user=user)
 
-        return Response({ "token": token.key })
+            response.data = {'message': 'Logged in successfully'}
+
+        return response
